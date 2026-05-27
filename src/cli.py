@@ -2,6 +2,7 @@
 
 import argparse
 import sys
+import io
 from pathlib import Path
 
 from rich.console import Console
@@ -13,6 +14,10 @@ from rich import print as rprint
 from .agent import BioAgent
 from .config import config
 
+# Force UTF-8 on Windows to avoid GBK encoding errors with emoji
+if sys.stdout.encoding != "utf-8":
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8")
+    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8")
 
 console = Console()
 
