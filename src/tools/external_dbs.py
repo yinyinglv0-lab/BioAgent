@@ -366,7 +366,7 @@ def query_kegg(keyword: str, search_type: str = "gene") -> dict:
 
         results = []
         if isinstance(text, str) and text.strip():
-            for line in text.strip().split("\n")[:10]:
+            for line in text.strip().split("\n"):
                 parts = line.split("\t", 1)
                 if len(parts) == 2:
                     kegg_id, desc = parts
@@ -377,11 +377,49 @@ def query_kegg(keyword: str, search_type: str = "gene") -> dict:
                             "description": gene_part[:200],
                         })
 
+        # Pick best human match: prefer exact gene symbol match
+        def _pick_best_match(matches, keyword):
+            kw_upper = keyword.upper()
+            for m in matches:
+                desc_upper = m["description"].upper()
+                # Check if keyword matches first symbol in description (e.g., "BRCA1,")
+                first_symbol = desc_upper.split(",")[0].strip()
+                if kw_upper == first_symbol:
+                    return m
+            return matches[0] if matches else None
+
+        # Fetch pathway info for the matched gene via KEGG get
+        pathways = []
+        best = _pick_best_match(results, keyword)
+        if best:
+            hsa_id = best["kegg_id"]
+            get_url = f"{base}/get/{hsa_id}"
+            gene_text = _http_get(get_url)
+            if isinstance(gene_text, str) and "PATHWAY" in gene_text:
+                in_pathway = False
+                for line in gene_text.split("\n"):
+                    if line.startswith("PATHWAY"):
+                        in_pathway = True
+                        parts = line.split(None, 2)
+                        if len(parts) >= 3 and parts[1].startswith("hsa"):
+                            pathways.append({"id": parts[1], "name": parts[2]})
+                    elif in_pathway and line.startswith(" "):
+                        stripped = line.strip()
+                        parts = stripped.split(None, 1)
+                        # Only include hsa pathways, skip reference entries ([BR:xxx]) and non-pathway IDs
+                        if len(parts) >= 2 and parts[0].startswith("hsa"):
+                            pathways.append({"id": parts[0], "name": parts[1]})
+                        elif not stripped or stripped[0].isdigit():
+                            in_pathway = False
+                    else:
+                        in_pathway = False
+
         return {
             "database": "KEGG",
             "keyword": keyword,
             "search_type": "gene",
-            "human_matches": results[:10],
+            "human_matches": results[:20],
+            "pathways": pathways,
             "url": f"https://www.kegg.jp/kegg-bin/search?q={urllib.parse.quote(keyword)}",
         }
 
