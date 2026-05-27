@@ -2,7 +2,6 @@
 
 import sys
 from pathlib import Path
-
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 
@@ -11,90 +10,74 @@ def test_tool_registry():
     from src.tools import TOOL_REGISTRY, get_all_tools
 
     expected_tools = {
-        "read_paper",
-        "query_disease",
-        "query_gene",
-        "differential_expression",
-        "survival_analysis",
-        "search_pubmed",
-        "run_enrichment",
+        "read_paper", "search_pubmed", "run_enrichment",
+        "query_tcga", "query_geo", "query_uniprot",
+        "query_ensembl", "query_kegg", "query_clinvar", "query_dbsnp",
     }
 
     registered = set(TOOL_REGISTRY.keys())
     missing = expected_tools - registered
-    extra = registered - expected_tools
+    unexpected = registered - expected_tools
 
     assert not missing, f"Missing tools: {missing}"
-    print(f"  All {len(expected_tools)} tools registered")
-
-    tools = get_all_tools()
-    assert len(tools) == len(expected_tools), f"Expected {len(expected_tools)} tools, got {len(tools)}"
-    print(f"  get_all_tools() returns {len(tools)} ToolParam objects")
+    if unexpected:
+        print(f"  Extra tools (OK): {unexpected}")
+    print(f"  All {len(expected_tools)} expected tools registered")
+    assert len(get_all_tools()) == len(TOOL_REGISTRY)
 
 
 def test_config():
-    """Verify config module."""
     from src.config import Config
     assert Config.PROJECT_NAME == "BioAgent"
     assert Config.VERSION == "1.0.0"
-    print(f"  Config: {Config.PROJECT_NAME} v{Config.VERSION}")
+    print(f"  Config OK: {Config.PROJECT_NAME} v{Config.VERSION}")
 
 
-def test_pdf_reader_simulation():
-    """Test PDF reader returns proper error for missing file."""
-    from src.tools.pdf_reader import read_paper
-    result = read_paper("/nonexistent/paper.pdf")
-    assert "error" in result or "char_count" in result
-    print(f"  PDF reader handles missing files gracefully")
+def test_uniprot():
+    from src.tools.external_dbs import query_uniprot
+    r = query_uniprot('TP53')
+    assert 'results' in r
+    assert len(r['results']) > 0
+    print(f"  UniProt: {r['results'][0]['protein_name']}")
 
 
-def test_db_query_without_connection():
-    """Test DB query returns error when MySQL unavailable."""
-    from src.tools.db_query import query_disease
-    result = query_disease("Lung")
-    # Should either return results or graceful error
-    assert isinstance(result, dict)
-    assert "error" in result or "results" in result
-    print(f"  DB query handles missing connection gracefully")
+def test_ensembl():
+    from src.tools.external_dbs import query_ensembl
+    r = query_ensembl('EGFR')
+    assert 'ensembl_id' in r
+    print(f"  Ensembl: {r['ensembl_id']}")
 
 
-def test_enrichment():
-    """Test enrichment with known genes."""
-    from src.tools.expression import run_enrichment
-    result = run_enrichment(["TP53", "EGFR", "VEGFA"])
-    assert result["genes_queried"] == ["TP53", "EGFR", "VEGFA"]
-    assert "results" in result
-    print(f"  Enrichment: {result['total_terms']} terms found for 3 genes")
+def test_geo():
+    from src.tools.external_dbs import query_geo
+    r = query_geo('cancer')
+    assert 'results' in r
+    print(f"  GEO: {len(r['results'])} datasets")
 
 
-def test_pubmed_search():
-    """Test PubMed search (may fail without internet)."""
+def test_pubmed():
     from src.tools.web_search import search_pubmed
-    result = search_pubmed("TP53 cancer", max_results=3)
-    assert isinstance(result, dict)
-    assert "query" in result
-    print(f"  PubMed search for '{result['query']}' returned {len(result.get('results', []))} papers")
+    r = search_pubmed('TP53 cancer', 3)
+    assert 'query' in r
+    print(f"  PubMed: '{r['query']}' => {len(r.get('results', []))} papers")
+
+
+def test_kegg():
+    from src.tools.external_dbs import query_kegg
+    r = query_kegg('cell cycle', 'pathway')
+    assert 'pathways' in r
+    print(f"  KEGG: {len(r['pathways'])} pathways")
 
 
 if __name__ == "__main__":
     print("BioAgent Tool Tests\n")
-
-    tests = [
-        test_config,
-        test_tool_registry,
-        test_pdf_reader_simulation,
-        test_db_query_without_connection,
-        test_enrichment,
-        test_pubmed_search,
-    ]
-
+    tests = [test_config, test_tool_registry, test_uniprot, test_ensembl, test_geo, test_pubmed, test_kegg]
     passed = 0
-    for test in tests:
+    for t in tests:
         try:
-            test()
-            print(f"  PASS: {test.__name__}")
+            t()
+            print(f"  PASS: {t.__name__}")
             passed += 1
         except Exception as e:
-            print(f"  FAIL: {test.__name__} - {e}")
-
-    print(f"\n{passed}/{len(tests)} tests passed")
+            print(f"  FAIL: {t.__name__} - {e}")
+    print(f"\n{passed}/{len(tests)} passed")

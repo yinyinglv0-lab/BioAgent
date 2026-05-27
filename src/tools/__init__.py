@@ -54,9 +54,6 @@ def execute_tool(name: str, inputs: dict[str, Any]) -> dict[str, Any]:
 # ============================================================
 
 from . import pdf_reader       # noqa: E402, F401
-from . import db_query         # noqa: E402, F401
-from . import expression       # noqa: E402, F401
-from . import survival         # noqa: E402, F401
 from . import web_search       # noqa: E402, F401
 from . import enrichment       # noqa: E402, F401
 from . import external_dbs     # noqa: E402, F401

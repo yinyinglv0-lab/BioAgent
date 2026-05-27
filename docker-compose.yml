@@ -12,19 +12,3 @@ services:
       - ./data:/app/data
       - ./logs:/app/logs
     restart: unless-stopped
-
-  # Optional: MySQL for disease database
-  mysql:
-    image: mysql:8.0
-    container_name: bioagent-db
-    environment:
-      MYSQL_ROOT_PASSWORD: root123
-      MYSQL_DATABASE: disease_db
-    ports:
-      - "3307:3306"
-    volumes:
-      - mysql_data:/var/lib/mysql
-    restart: unless-stopped
-
-volumes:
-  mysql_data:
