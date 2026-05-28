@@ -6,38 +6,71 @@ from . import register
 logger = logging.getLogger(__name__)
 
 
+PUBMED_FIELD_QUALIFIERS = {
+    "all": "",
+    "title": "[Title]",
+    "title_abstract": "[Title/Abstract]",
+    "author": "[Author]",
+    "journal": "[Journal]",
+    "mesh": "[MeSH Terms]",
+    "pmid": "[PMID]",
+}
+
+
 @register(
     name="search_pubmed",
-    description="Search PubMed for scientific literature. Returns paper titles, authors, journal, year, and PMID.",
+    description=(
+        "Search PubMed for scientific literature. "
+        "Returns total match count, paper titles, authors, journal, year, and PMID. "
+        "Use search_field='title' to search titles only, 'title_abstract' for title+abstract, "
+        "'author' for author name, 'mesh' for MeSH terms."
+    ),
     input_schema={
         "type": "object",
         "properties": {
             "query": {
                 "type": "string",
-                "description": "Search query for PubMed (e.g., 'SEMA3A renal cell carcinoma')",
+                "description": "Search query (e.g., 'BRCA1 breast cancer', 'Smith J[Author] AND TP53')",
             },
             "max_results": {
                 "type": "integer",
-                "description": "Maximum number of results (default: 10)",
+                "description": "Number of paper details to return (default: 10). Does NOT affect total count.",
                 "default": 10,
+            },
+            "search_field": {
+                "type": "string",
+                "enum": ["all", "title", "title_abstract", "author", "journal", "mesh"],
+                "description": "PubMed field to search in. 'title' for titles only, 'title_abstract' for title+abstract, 'all' for everywhere.",
+                "default": "all",
             },
         },
         "required": ["query"],
     },
 )
-def search_pubmed(query: str, max_results: int = 10) -> dict:
-    """Search PubMed via E-utilities API and return formatted results."""
+def search_pubmed(query: str, max_results: int = 10, search_field: str = "all") -> dict:
+    """Search PubMed via E-utilities API and return formatted results.
+
+    Uses esearch.count for the real total number of PubMed matches,
+    not just the count of returned article details.
+    """
     import json
     import urllib.request
     import urllib.parse
     import xml.etree.ElementTree as ET
+
+    # Append field qualifier if user chose a specific field
+    qualifier = PUBMED_FIELD_QUALIFIERS.get(search_field, "")
+    if qualifier and qualifier not in query:
+        pubmed_query = f"{query}{qualifier}"
+    else:
+        pubmed_query = query
 
     try:
         # ESearch - get IDs
         esearch_url = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi"
         params = urllib.parse.urlencode({
             "db": "pubmed",
-            "term": query,
+            "term": pubmed_query,
             "retmax": max_results,
             "retmode": "json",
             "sort": "relevance",
@@ -45,11 +78,21 @@ def search_pubmed(query: str, max_results: int = 10) -> dict:
         with urllib.request.urlopen(f"{esearch_url}?{params}", timeout=10) as resp:
             search_data = json.loads(resp.read())
 
-        id_list = search_data.get("esearchresult", {}).get("idlist", [])
-        if not id_list:
-            return {"query": query, "results": [], "message": "No results found"}
+        esearch_result = search_data.get("esearchresult", {})
+        id_list = esearch_result.get("idlist", [])
+        # Real total from PubMed — this is the number the user cares about
+        total_count = int(esearch_result.get("count", 0))
 
-        # EFetch - get details
+        if not id_list:
+            return {
+                "query": pubmed_query,
+                "search_field": search_field,
+                "total_count": total_count,
+                "results": [],
+                "message": "No results found",
+            }
+
+        # EFetch - get details for the returned IDs
         efetch_url = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi"
         fetch_params = urllib.parse.urlencode({
             "db": "pubmed",
@@ -97,12 +140,19 @@ def search_pubmed(query: str, max_results: int = 10) -> dict:
             except Exception:
                 continue
 
-        return {"query": query, "total_found": len(articles), "results": articles}
+        return {
+            "query": pubmed_query,
+            "search_field": search_field,
+            "total_count": total_count,
+            "returned": len(articles),
+            "results": articles,
+            "pubmed_url": f"https://pubmed.ncbi.nlm.nih.gov/?term={urllib.parse.quote(pubmed_query)}",
+        }
 
     except Exception as e:
         logger.warning(f"PubMed search failed: {e}")
         return {
-            "query": query,
+            "query": pubmed_query,
             "error": f"PubMed API unavailable: {e}",
             "fallback": "Use general knowledge or provide information from training data.",
         }
