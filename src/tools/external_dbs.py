@@ -6,6 +6,7 @@ Each tool is self-contained and returns structured JSON results.
 
 import json
 import logging
+import ssl
 import urllib.request
 import urllib.parse
 import urllib.error
@@ -15,12 +16,20 @@ from . import register
 
 logger = logging.getLogger(__name__)
 
+# Use certifi's CA bundle: some hosts fail verification against the
+# default CA list on Windows.
+try:
+    import certifi
+    _SSL_CTX = ssl.create_default_context(cafile=certifi.where())
+except ImportError:
+    _SSL_CTX = None
+
 
 def _http_get(url: str, timeout: int = 15) -> dict | str:
     """Helper: Make an HTTP GET request, return parsed JSON or raw text."""
     try:
         req = urllib.request.Request(url, headers={"User-Agent": "BioAgent/1.0"})
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
+        with urllib.request.urlopen(req, timeout=timeout, context=_SSL_CTX) as resp:
             text = resp.read().decode("utf-8")
         try:
             return json.loads(text)
@@ -606,4 +615,192 @@ def query_dbsnp(query: str) -> dict:
         "total_snps": total,
         "results": results,
         "url": f"https://www.ncbi.nlm.nih.gov/snp/?term={urllib.parse.quote(term)}",
+    }
+
+
+# ============================================================
+# 8. STRING - Protein-Protein Interaction Network
+# ============================================================
+
+@register(
+    name="query_string_network",
+    description="Query STRING database for protein-protein interaction (PPI) network. Input a list of gene symbols (comma-separated) and get interaction scores, network edges, and functional enrichment. Use this for analyzing relationships between multiple proteins.",
+    input_schema={
+        "type": "object",
+        "properties": {
+            "genes": {
+                "type": "string",
+                "description": "Comma-separated gene symbols, e.g., 'TP53,BRCA1,EGFR,MDM2'",
+            },
+            "species": {
+                "type": "integer",
+                "description": "NCBI taxonomy ID (default: 9606 for human)",
+                "default": 9606,
+            },
+            "min_score": {
+                "type": "integer",
+                "description": "Minimum interaction score threshold 0-1000 (default: 400 for medium confidence)",
+                "default": 400,
+            },
+        },
+        "required": ["genes"],
+    },
+)
+def query_string_network(genes: str, species: int = 9606, min_score: int = 400) -> dict:
+    """Query STRING for protein-protein interaction network."""
+
+    gene_list = [g.strip().upper() for g in genes.split(",") if g.strip()]
+    if not gene_list:
+        return {"error": "No valid genes provided"}
+
+    identifiers = "%0d".join(gene_list)
+    url = (
+        f"https://string-db.org/api/tsv/network?"
+        f"identifiers={urllib.parse.quote(identifiers)}&species={species}"
+        f"&required_score={min_score}&add_nodes=1"
+    )
+
+    text = _http_get(url)
+
+    if isinstance(text, dict) and "error" in text:
+        return text
+
+    if not isinstance(text, str) or not text.strip():
+        return {
+            "database": "STRING",
+            "genes": gene_list,
+            "interactions": [],
+            "message": "No interactions found above the score threshold",
+            "url": f"https://string-db.org/cgi/network?identifiers={urllib.parse.quote(identifiers)}&species={species}",
+        }
+
+    # Parse TSV response
+    # Columns: stringId_A, stringId_B, preferredName_A, preferredName_B,
+    #          ncbiTaxonId, score, nscore, fscore, pscore, ascore, escore,
+    #          dscore, tscore
+    def _to_float(v):
+        try:
+            return float(v)
+        except (ValueError, TypeError):
+            return None
+
+    interactions = []
+    proteins_found = set()
+    lines = text.strip().split("\n")
+    for line in lines[1:]:  # Skip header
+        cols = line.split("\t")
+        if len(cols) >= 13:
+            gene1, gene2 = cols[2], cols[3]  # preferred names
+            interactions.append({
+                "gene1": gene1,
+                "gene2": gene2,
+                "score": _to_float(cols[5]),
+                "channel_scores": {
+                    "neighborhood": _to_float(cols[6]),
+                    "fusion": _to_float(cols[7]),
+                    "cooccurrence": _to_float(cols[8]),
+                    "coexpression": _to_float(cols[9]),
+                    "experiments": _to_float(cols[10]),
+                    "database": _to_float(cols[11]),
+                    "textmining": _to_float(cols[12]),
+                },
+            })
+            for g in (gene1, gene2):
+                if g not in gene_list:
+                    proteins_found.add(g)
+
+    return {
+        "database": "STRING",
+        "genes_queried": gene_list,
+        "total_interactions": len(interactions),
+        "interactions": interactions[:50],
+        "additional_proteins": sorted(proteins_found)[:30],
+        "url": f"https://string-db.org/cgi/network?identifiers={urllib.parse.quote(identifiers)}&species={species}",
+    }
+
+
+@register(
+    name="query_string_enrichment",
+    description="Query STRING database for functional enrichment analysis on a gene list. Returns enriched GO terms, KEGG pathways, and other functional categories with FDR-corrected p-values.",
+    input_schema={
+        "type": "object",
+        "properties": {
+            "genes": {
+                "type": "string",
+                "description": "Comma-separated gene symbols for enrichment analysis, e.g., 'TP53,BRCA1,EGFR,MDM2,PTEN'",
+            },
+            "species": {
+                "type": "integer",
+                "description": "NCBI taxonomy ID (default: 9606 for human)",
+                "default": 9606,
+            },
+        },
+        "required": ["genes"],
+    },
+)
+def query_string_enrichment(genes: str, species: int = 9606) -> dict:
+    """Query STRING for functional enrichment of a gene list."""
+
+    gene_list = [g.strip().upper() for g in genes.split(",") if g.strip()]
+    if len(gene_list) < 2:
+        return {"error": "Need at least 2 genes for enrichment analysis"}
+
+    identifiers = "%0d".join(gene_list)
+    url = (
+        f"https://string-db.org/api/tsv/enrichment?"
+        f"identifiers={urllib.parse.quote(identifiers)}&species={species}"
+    )
+
+    text = _http_get(url)
+
+    if isinstance(text, dict) and "error" in text:
+        return text
+
+    if not isinstance(text, str) or not text.strip():
+        return {
+            "database": "STRING",
+            "genes": gene_list,
+            "enrichment": [],
+            "message": "No enrichment results found",
+        }
+
+    # Columns: category, term, number_of_genes, number_of_genes_in_background,
+    #          ncbiTaxonId, inputGenes, preferredNames, p_value, fdr, description
+    def _to_float(v):
+        try:
+            return float(v)
+        except (ValueError, TypeError):
+            return None
+
+    enrichment = []
+    lines = text.strip().split("\n")
+    for line in lines[1:]:
+        cols = line.split("\t")
+        if len(cols) >= 10:
+            enrichment.append({
+                "category": cols[0],
+                "term_id": cols[1],
+                "term": cols[9],
+                "gene_count": cols[3],
+                "input_genes": cols[5].split(","),
+                "p_value": _to_float(cols[7]),
+                "fdr": _to_float(cols[8]),
+            })
+
+    # Sort by FDR, group top per category
+    enrichment.sort(key=lambda x: x["fdr"])
+    top_by_category = {}
+    for e in enrichment:
+        cat = e["category"]
+        if cat not in top_by_category:
+            top_by_category[cat] = []
+        if len(top_by_category[cat]) < 5:
+            top_by_category[cat].append(e)
+
+    return {
+        "database": "STRING",
+        "genes_queried": gene_list,
+        "total_terms": len(enrichment),
+        "top_terms": top_by_category,
+        "url": f"https://string-db.org/cgi/network?identifiers={urllib.parse.quote(identifiers)}&species={species}",
     }
