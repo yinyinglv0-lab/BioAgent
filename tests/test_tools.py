@@ -13,6 +13,7 @@ def test_tool_registry():
         "read_paper", "search_pubmed", "run_enrichment",
         "query_tcga", "query_geo", "query_uniprot",
         "query_ensembl", "query_kegg", "query_clinvar", "query_dbsnp",
+        "query_string_network", "query_string_enrichment",
     }
 
     registered = set(TOOL_REGISTRY.keys())
@@ -20,9 +21,8 @@ def test_tool_registry():
     unexpected = registered - expected_tools
 
     assert not missing, f"Missing tools: {missing}"
-    if unexpected:
-        print(f"  Extra tools (OK): {unexpected}")
-    print(f"  All {len(expected_tools)} expected tools registered")
+    assert not unexpected, f"Unexpected tools: {unexpected}"
+    print(f"  All {len(expected_tools)} tools registered")
     assert len(get_all_tools()) == len(TOOL_REGISTRY)
 
 

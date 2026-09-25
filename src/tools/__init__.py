@@ -27,6 +27,11 @@ def register(name: str, description: str, input_schema: dict[str, Any]):
     return decorator
 
 
+def get_all_tools() -> list:
+    """Return all registered tools in the generic registry format."""
+    return list(TOOL_REGISTRY.values())
+
+
 def get_tools_anthropic() -> list:
     """Return tools in Anthropic/Claude ToolParam format."""
     from anthropic.types import ToolParam
