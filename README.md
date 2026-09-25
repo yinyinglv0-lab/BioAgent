@@ -73,9 +73,15 @@ BioAgent combines a large language model with a registry of bioinformatics tools
 
 ### Interfaces
 
-- **Web UI** — FastAPI + vanilla JS dark theme (default mode; `python -m src.cli`)
+- **Web UI** — FastAPI + vanilla JS (default mode; `python -m src.cli`)
 - **CLI** — single-query mode: `python -m src.cli -q "..."`
 - **Python API** — `from src.agent import BioAgent`; direct tool calls available too
+
+## Screenshots
+
+| Welcome screen | Live answer (TP53 → UniProt + KEGG + Ensembl) |
+|---|---|
+| ![BioAgent web UI welcome](docs/screenshots/webui_home.png) | ![BioAgent multi-tool answer](docs/screenshots/webui_demo.png) |
 
 ## Quick Start
 
